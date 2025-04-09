@@ -69,32 +69,34 @@ export default function TryNowPage() {
     if (webcamActive) {
       // Initial fetch
       fetchSessionData()
-
+  
       // Set up interval for fetching data
       dataFetchInterval.current = setInterval(fetchSessionData, 1000)
-
+  
       // Clean up interval on unmount or when webcam is stopped
       return () => {
         if (dataFetchInterval.current) {
           clearInterval(dataFetchInterval.current)
+          dataFetchInterval.current = null
         }
       }
     } else if (dataFetchInterval.current) {
       clearInterval(dataFetchInterval.current)
+      dataFetchInterval.current = null
     }
   }, [webcamActive])
-
+  
   const fetchSessionData = async () => {
     try {
       setConnectionError(false)
       const response = await fetch("http://127.0.0.1:5000/session_data")
-
+  
       if (!response.ok) {
         throw new Error(`HTTP error! Status: ${response.status}`)
       }
-
+  
       const data = await response.json()
-
+  
       // Update session data
       const updatedSessionData = {
         totalPedestrians: data.totalPedestrians || 0,
@@ -102,48 +104,51 @@ export default function TryNowPage() {
         mediumRisk: data.mediumRisk || 0,
         lowRisk: data.lowRisk || 0,
       }
-
+  
       setSessionData(updatedSessionData)
-
+  
       // Update time series data
       const now = new Date().toLocaleTimeString()
       setTimeSeriesData((prev) => {
-        const newPoint = {
+        const newPoint: TimePoint = {
           time: now,
           total: updatedSessionData.totalPedestrians,
           high: updatedSessionData.highRisk,
           medium: updatedSessionData.mediumRisk,
           low: updatedSessionData.lowRisk,
         }
-
-        // Keep only the last 20 data points for the chart
+  
         const updatedData = [...prev, newPoint]
-        if (updatedData.length > 20) {
-          return updatedData.slice(updatedData.length - 20)
-        }
-        return updatedData
+        return updatedData.length > 20 ? updatedData.slice(-20) : updatedData
       })
-
+  
       // Process pedestrian data if available
-      if (data.pedestrians && Array.isArray(data.pedestrians)) {
-        const newPedestrians: PedestrianData[] = data.pedestrians.map((ped: any): PedestrianData => ({
-          id: ped.id || `ped_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          timestamp: ped.timestamp || new Date().toISOString(),
-          risk_level: (ped.risk_level as "high" | "medium" | "low") || "low",
-          confidence: typeof ped.confidence === "number" ? ped.confidence : 0.8,
-          position_x: typeof ped.position_x === "number" ? ped.position_x : 0,
-          position_y: typeof ped.position_y === "number" ? ped.position_y : 0,
-          session_id: sessionId,
-        }))
-
-        // Add to history
+      if (Array.isArray(data.pedestrians)) {
+        const newPedestrians: PedestrianData[] = data.pedestrians.map((ped: any): PedestrianData => {
+          const timestamp =
+            typeof ped.timestamp === "string" && !isNaN(Date.parse(ped.timestamp))
+              ? ped.timestamp
+              : new Date().toISOString()
+  
+          return {
+            id: typeof ped.id === "string" ? ped.id : `ped_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            timestamp,
+            risk_level: ped.risk_level === "high" || ped.risk_level === "medium" ? ped.risk_level : "low",
+            confidence: typeof ped.confidence === "number" ? ped.confidence : 0.8,
+            position_x: typeof ped.position_x === "number" ? ped.position_x : 0,
+            position_y: typeof ped.position_y === "number" ? ped.position_y : 0,
+            session_id: sessionId,
+          }
+        })
+  
+        // Add to history (remove duplicates)
         setPedestrianHistory((prev) => {
-          const existingIds = new Set(prev.map((p: PedestrianData) => p.id))
-          const uniqueNew = newPedestrians.filter((p: PedestrianData) => !existingIds.has(p.id))
+          const existingIds = new Set(prev.map((ped) => ped.id))
+          const uniqueNew = newPedestrians.filter((ped) => !existingIds.has(ped.id))
           return [...prev, ...uniqueNew]
         })
-
-        // Store in Supabase if available
+  
+        // Store in Supabase
         if (supabase) {
           for (const pedestrian of newPedestrians) {
             try {
@@ -154,12 +159,12 @@ export default function TryNowPage() {
           }
         }
       }
-
     } catch (error) {
       console.error("Error fetching session data:", error)
       setConnectionError(true)
     }
   }
+  
 
   const handleWebcamToggle = async () => {
     try {
